@@ -1,0 +1,176 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidProfileMap(p) {
+      return p is map
+        && p.keys().hasAll(['name', 'email', 'avatar', 'themePreference', 'pomodoroSessions', 'studiedMinutes'])
+        && p.keys().hasOnly(['name', 'email', 'avatar', 'themePreference', 'pomodoroSessions', 'studiedMinutes'])
+        && p.name is string && p.name.size() >= 1 && p.name.size() <= 80
+        && p.email is string && p.email.size() <= 160
+        && p.avatar is string && p.avatar.size() >= 1 && p.avatar.size() <= 16
+        && (p.themePreference == 'light' || p.themePreference == 'dark')
+        && p.pomodoroSessions is number && p.pomodoroSessions >= 0 && p.pomodoroSessions <= 100000
+        && p.studiedMinutes is number && p.studiedMinutes >= 0 && p.studiedMinutes <= 1000000;
+    }
+
+    function isValidSyllabusProgress(sp) {
+      return sp is map
+        && sp.keys().hasAll(['completedTopics', 'completedDays', 'dayNotes', 'statusOverrides'])
+        && sp.keys().hasOnly(['completedTopics', 'completedDays', 'dayNotes', 'statusOverrides'])
+        && sp.completedTopics is list && sp.completedTopics.size() <= 200
+        && (sp.completedTopics.size() == 0 || sp.completedTopics[0] is string)
+        && sp.completedDays is list && sp.completedDays.size() <= 60
+        && (sp.completedDays.size() == 0 || sp.completedDays[0] is number)
+        && sp.dayNotes is map && sp.dayNotes.size() <= 60
+        && sp.statusOverrides is map && sp.statusOverrides.size() <= 20;
+    }
+
+    function isValidGameRecords(gr) {
+      return gr is map
+        && gr.keys().hasAll(['sprintBestScore'])
+        && gr.keys().hasOnly(['sprintBestScore'])
+        && gr.sprintBestScore is number && gr.sprintBestScore >= 0 && gr.sprintBestScore <= 1000000;
+    }
+
+    function isValidUserStudyDocument(data, userId) {
+      return data is map
+        && data.keys().hasAll([
+          'uid',
+          'profile',
+          'syllabusProgress',
+          'questionsHistory',
+          'questionAttempts',
+          'gameRecords',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'profile',
+          'syllabusProgress',
+          'questionsHistory',
+          'questionAttempts',
+          'gameRecords',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == userId && data.uid == request.auth.uid
+        && isValidProfileMap(data.profile)
+        && isValidSyllabusProgress(data.syllabusProgress)
+        && data.questionsHistory is map && data.questionsHistory.size() <= 400
+        && data.questionAttempts is list && data.questionAttempts.size() <= 1000
+        && (data.questionAttempts.size() == 0 || data.questionAttempts[0] is map)
+        && isValidGameRecords(data.gameRecords)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidLeaderboardEntry(data, userId) {
+      return data is map
+        && data.keys().hasAll([
+          'uid',
+          'name',
+          'avatar',
+          'totalAnswered',
+          'accuracyRate',
+          'masteredCount',
+          'pomodoroCount',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'name',
+          'avatar',
+          'totalAnswered',
+          'accuracyRate',
+          'masteredCount',
+          'pomodoroCount',
+          'updatedAt'
+        ])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == userId && data.uid == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.avatar is string && data.avatar.size() >= 1 && data.avatar.size() <= 16
+        && data.totalAnswered is number && data.totalAnswered >= 0 && data.totalAnswered <= 1000000
+        && data.accuracyRate is number && data.accuracyRate >= 0 && data.accuracyRate <= 100
+        && data.masteredCount is number && data.masteredCount >= 0 && data.masteredCount <= 1000
+        && data.pomodoroCount is number && data.pomodoroCount >= 0 && data.pomodoroCount <= 100000
+        && data.updatedAt is timestamp;
+    }
+
+    // Private per-user study document (owner-only read & write; no public listing or PII exposure)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserStudyDocument(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserStudyDocument(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'profile',
+          'syllabusProgress',
+          'questionsHistory',
+          'questionAttempts',
+          'gameRecords',
+          'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Public summary ranking for signed-in users (zero PII)
+    match /leaderboard/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && resource.data.totalAnswered >= 0;
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name',
+          'avatar',
+          'totalAnswered',
+          'accuracyRate',
+          'masteredCount',
+          'pomodoroCount',
+          'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+  }
+}

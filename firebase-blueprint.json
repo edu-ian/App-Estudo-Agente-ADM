@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "UserStudyDocument": {
+      "title": "UserStudyDocument",
+      "description": "Documento privado do usuário autenticado contendo perfil, progresso do edital, histórico SRS de questões e recordes de treino.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "profile": {
+          "type": "object"
+        },
+        "syllabusProgress": {
+          "type": "object"
+        },
+        "questionsHistory": {
+          "type": "object"
+        },
+        "questionAttempts": {
+          "type": "array"
+        },
+        "gameRecords": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "profile",
+        "syllabusProgress",
+        "questionsHistory",
+        "questionAttempts",
+        "gameRecords",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Resumo público de desempenho para o Ranking de Estudos multi-usuário sem expor dados privados.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "avatar": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "totalAnswered": {
+          "type": "number"
+        },
+        "accuracyRate": {
+          "type": "number"
+        },
+        "masteredCount": {
+          "type": "number"
+        },
+        "pomodoroCount": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "name",
+        "avatar",
+        "totalAnswered",
+        "accuracyRate",
+        "masteredCount",
+        "pomodoroCount",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserStudyDocument"
+      },
+      "description": "Armazena e sincroniza em tempo real o estado completo de estudos de cada usuário autenticado."
+    },
+    "/leaderboard/{userId}": {
+      "schema": {
+        "$ref": "#/entities/LeaderboardEntry"
+      },
+      "description": "Placar comparativo público entre usuários autenticados com estatísticas agregadas sem PII."
+    }
+  }
+}
